@@ -116,7 +116,7 @@ class Root(BoxLayout):
         self.clear_widgets()
         bPage = Factory.BpPage()
         self.add_widget(bPage)
-        
+    
     def tempPage(self):
         try:
             open('tempTest.csv')
@@ -177,6 +177,66 @@ class Root(BoxLayout):
         self.clear_widgets()
         tRec = Factory.TempRecords()
         self.add_widget(tRec) 
+        
+    def ecgAnalyse(self):
+       	hrw = 0.75 #One-sided window size, as proportion of the sampling frequency
+        fs = 100 #The example dataset was recorded at 100Hz
+	       dataset = read_csv('ecg.csv')
+        dataset=dataset.drop('0',axis=1)
+        dataset.columns=['hart']
+        mov_avg = np.array(dataset['hart'].rolling(10).mean().dropna()) #Calculate moving average
+        #Impute where moving average function returns NaN, which is the beginning of the signal where x hrw
+        avg_hr = (np.mean(dataset.hart))
+        mov_avg = [avg_hr if math.isnan(x) else x for x in mov_avg]
+        mov_avg = [x*2 for x in mov_avg] #For now we raise the average by 20% to prevent the secondary heart contraction from interfering, in part 2 we will do this dynamically
+        dataset.hart=dataset.hart.iloc[:len(mov_avg)]
+        hartnew=dataset.hart.dropna()
+        dataset.hart=hartnew
+        dataset=dataset.dropna()
+        dataset['hart_rollingmean'] = mov_avg #Append the moving average to the dataframe
+        #Mark regions of interest
+        window = []
+        peaklist = []
+        listpos = 0 #We use a counter to move over the different data columns
+        rollingmean=hartnew.mean()+0.4
+        for datapoint in dataset.hart:
+            #rollingmean = dataset.hart_rollingmean[listpos]-2 #Get local mean
+            if (datapoint < rollingmean) and (len(window) < 1): #If no detectable R-complex activity -> do nothing
+                listpos += 1
+            elif (datapoint > rollingmean): #If signal comes above local mean, mark ROI
+                window.append(datapoint)
+                listpos += 1
+            else: #If signal drops below local mean -> determine highest point
+                maximum = max(window)
+                beatposition = listpos - len(window) + (window.index(max(window))) #Notate the position of the point on the X-axis
+                peaklist.append(beatposition) #Add detected peak to list
+                window = [] #Clear marked ROI
+                listpos += 1
+        ybeat = [dataset.hart[x] for x in peaklist] #Get the y-value of all peaks for plotting purposes
+        RR_list = []
+        cnt = 0
+        while (cnt < (len(peaklist)-1)):
+            RR_interval = (peaklist[cnt+1] - peaklist[cnt]) #Calculate distance between beats in # of samples
+            ms_dist = ((RR_interval / fs) * 1000.0) #Convert sample distances to ms distances
+            RR_list.append(ms_dist) #Append to list
+            cnt += 1
+        bpm = 60000 / np.mean(RR_list) #60000 ms (1 minute) / average R-R interval of signal
+        #Setting up the plots of ECG (R peaks highlighted) and ECG moving average
+        f, axarr = plt.subplots(2, sharex=True)
+        f.suptitle(str(bpm)+' bps Heartrate')
+        axarr[0].plot(dataset.hart, alpha=0.5, color='blue')
+        axarr[0].scatter(peaklist, ybeat, color='red')
+        axarr[0].set_xlabel('seconds')
+        axarr[0].set_ylabel('Voltage reading')
+        axarr[0].set_title('ECG Sensor Readings')
+        #axarr[0].invert_yaxis()
+        axarr[0].grid(True)
+        axarr[1].plot(mov_avg, color ='green')
+        axarr[1].set_xlabel('seconds')
+        axarr[1].set_ylabel('Voltage reading')
+        axarr[1].set_title('ECG Moving Average')
+        axarr[1].grid(True)
+        plt.savefig('heart1.png') 
         
     def genRecords(self):
         with open('tempTest.csv',"r") as f:
@@ -277,6 +337,7 @@ class Root(BoxLayout):
             
             self.rec10time = str(mdata.iloc[row_count-2][0])
             self.rec10fahr = str(mdata.iloc[row_count-2][1])
+       
             
 class HealthguiApp(App):
     pass        
